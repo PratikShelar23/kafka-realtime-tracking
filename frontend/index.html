@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Delivery Tracking - Pune</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', sans-serif;
+        background: #f0f2f5;
+      }
+      h1 {
+        text-align: center;
+        padding: 12px;
+        background: #2c3e50;
+        color: white;
+        margin: 0;
+        font-size: 1.6rem;
+      }
+      #status {
+        text-align: center;
+        padding: 12px;
+        font-weight: bold;
+        color: white;
+        transition: all 0.5s;
+      }
+      #map {
+        height: 82vh;
+        width: 100%;
+        border-top: 3px solid #3498db;
+      }
+      .status-placed {
+        background: #95a5a6;
+      }
+      .status-picked {
+        background: #f39c12;
+      }
+      .status-enroute {
+        background: #e67e22;
+      }
+      .status-arriving {
+        background: #d35400;
+      }
+      .status-delivered {
+        background: #27ae60;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.05);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Live Food Delivery Tracking – Pune</h1>
+    <div id="status" class="status-placed">Order Placed</div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const ws = new WebSocket('ws://localhost:4000');
+      const map = L.map('map').setView([18.59, 73.73], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      const riders = new Map();
+      let startMarker, endMarker;
+
+      // Status to color mapping
+      const statusConfig = {
+        'Order Placed': { color: '#95a5a6', text: 'Order Placed at Restaurant' },
+        'Picked Up': { color: '#f39c12', text: 'Rider has picked up your order' },
+        'En-route': { color: '#e67e22', text: 'On the way to you' },
+        'Arriving Soon': { color: '#d35400', text: 'Arriving in a few minutes' },
+        Delivered: { color: '#27ae60', text: 'Delivered Successfully!' }, // ← fixed!
+      };
+
+      // Fixed markers
+      startMarker = L.marker([18.5018, 73.863], {
+        icon: L.divIcon({ className: 'icon', html: 'Restaurant', iconSize: [100, 40] }),
+      })
+        .addTo(map)
+        .bindPopup('<b>Restaurant</b><br>Swargate')
+        .openPopup();
+      endMarker = L.marker([18.704, 73.545], {
+        icon: L.divIcon({ className: 'icon', html: 'Your Location', iconSize: [100, 40] }),
+      })
+        .addTo(map)
+        .bindPopup('<b>Delivery Address</b><br>Hinjewadi Phase 3');
+
+      ws.onopen = () => {
+        document.getElementById('status').textContent = 'Connected – Waiting for updates...';
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type !== 'location') return;
+        const d = msg.data;
+        const key = d.orderId;
+
+        const config = statusConfig[d.status] || statusConfig['En-route'];
+
+        // Update top status bar
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = config.text;
+        statusEl.className = '';
+        statusEl.classList.add(
+          Object.keys(statusConfig)
+            .find((k) => statusConfig[k].text === config.text)
+            .toLowerCase()
+            .replace(' ', '-')
+        );
+
+        if (!riders.has(key)) {
+          const marker = L.marker([d.lat, d.lng]).addTo(map);
+          const polyline = L.polyline([], { color: config.color, weight: 6, opacity: 0.9 }).addTo(map);
+          riders.set(key, { marker, polyline, currentStatus: d.status });
+
+          // Initial popup
+          marker.bindPopup(getPopupContent(d, config)).openPopup();
+        }
+
+        const rider = riders.get(key);
+        rider.marker.setLatLng([d.lat, d.lng]);
+        rider.polyline.addLatLng([d.lat, d.lng]);
+        rider.polyline.setStyle({ color: config.color });
+
+        // Update popup
+        rider.marker.setPopupContent(getPopupContent(d, config));
+
+        if (d.status === 'Delivered') {
+          rider.marker.openPopup();
+          L.circleMarker([d.lat, d.lng], { radius: 20, color: '#27ae60', fillOpacity: 0.3 })
+            .addTo(map)
+            .bindPopup('Delivered!')
+            .openPopup();
+        }
+
+        map.setView([d.lat, d.lng], 14, { animate: true });
+      };
+
+      function getPopupContent(d, config) {
+        return `
+        <div style="text-align:center; font-family: sans-serif;">
+          <h3 style="margin:5px; color:${config.color}">${d.status}</h3>
+          <small>Order: <b>${d.orderId}</b></small><br>
+          <small>Rider: <b>${d.riderId}</b></small><br>
+          <hr style="margin:8px 0">
+          <div style="background:${config.color}20; padding:8px; border-radius:8px;">
+            ${config.text}
+          </div>
+        </div>
+      `;
+      }
+
+      // Custom icon style
+      const style = document.createElement('style');
+      style.innerHTML = `.icon { background: #e74c3c; color: white; padding: 5px 10px; border-radius: 20px; font-weight: bold; border: 3px solid white; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }`;
+      document.head.appendChild(style);
+    </script>
+  </body>
+</html>
